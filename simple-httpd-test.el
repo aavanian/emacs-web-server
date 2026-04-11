@@ -257,4 +257,69 @@ request's response must not start before the current one is complete."
     (should-not during-send)
     (should (equal dispatched '((("GET" "/b" "HTTP/1.1")))))))
 
+(ert-deftest httpd-buffer-has-mode ()
+  "After httpd-start, the *httpd* buffer uses httpd-mode."
+  (when (get-buffer "*httpd*") (kill-buffer "*httpd*"))
+  (unwind-protect
+      (httpd--flet ((make-network-process (&rest _) nil))
+        (httpd-start)
+        (should (eq (with-current-buffer "*httpd*" major-mode)
+                    'httpd-mode)))
+    (when (get-buffer "*httpd*") (kill-buffer "*httpd*"))))
+
+(ert-deftest httpd-buffer-has-status-running ()
+  "After httpd-start, the buffer header shows \"Running\"."
+  (when (get-buffer "*httpd*") (kill-buffer "*httpd*"))
+  (unwind-protect
+      (httpd--flet ((make-network-process (&rest _) nil))
+        (httpd-start)
+        (should (string-match-p "Running"
+                                (with-current-buffer "*httpd*"
+                                  (buffer-string)))))
+    (when (get-buffer "*httpd*") (kill-buffer "*httpd*"))))
+
+(ert-deftest httpd-buffer-has-url ()
+  "After httpd-start, the buffer header shows the server URL."
+  (when (get-buffer "*httpd*") (kill-buffer "*httpd*"))
+  (unwind-protect
+      (let ((httpd-port 9876)
+            (httpd-host 'local))
+        (httpd--flet ((make-network-process (&rest _) nil))
+          (httpd-start)
+          (should (string-match-p "http://localhost:9876/"
+                                  (with-current-buffer "*httpd*"
+                                    (buffer-string))))))
+    (when (get-buffer "*httpd*") (kill-buffer "*httpd*"))))
+
+(ert-deftest httpd-buffer-has-status-stopped ()
+  "After httpd-stop, the buffer header shows \"Stopped\"."
+  (when (get-buffer "*httpd*") (kill-buffer "*httpd*"))
+  (unwind-protect
+      (httpd--flet ((make-network-process (&rest _) 'fake-server)
+                    (process-live-p (proc) (and proc t))
+                    (delete-process (_proc) nil))
+        (httpd-start)
+        (httpd-stop)
+        (should (string-match-p "Stopped"
+                                (with-current-buffer "*httpd*"
+                                  (buffer-string)))))
+    (when (get-buffer "*httpd*") (kill-buffer "*httpd*"))))
+
+(ert-deftest httpd-buffer-log-preserved ()
+  "Log entries survive a header rewrite on restart."
+  (when (get-buffer "*httpd*") (kill-buffer "*httpd*"))
+  (unwind-protect
+      (httpd--flet ((make-network-process (&rest _) nil))
+        (httpd-start)
+        (httpd-log '(test-entry "preserved"))
+        (httpd-start)
+        (should (string-match-p "test-entry"
+                                (with-current-buffer "*httpd*"
+                                  (buffer-string)))))
+    (when (get-buffer "*httpd*") (kill-buffer "*httpd*"))))
+
+(ert-deftest httpd-mode-stop-binding ()
+  "In httpd-mode, \"s\" is bound to httpd-stop."
+  (should (eq (lookup-key httpd-mode-map "s") 'httpd-stop)))
+
 ;;; simple-httpd-test.el ends here

@@ -297,6 +297,59 @@ Set to nil to disable logging."
 (defvar httpd--clients nil
   "Client processes.")
 
+;; Status buffer
+
+(defvar httpd-mode-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map "s" #'httpd-stop)
+    map)
+  "Keymap for `httpd-mode'.")
+
+(define-derived-mode httpd-mode special-mode "HTTPD"
+  "Major mode for the `*httpd*' server status and log buffer."
+  (setf truncate-lines t))
+
+(defvar-local httpd--log-start nil
+  "Marker at the start of the log section in the `*httpd*' buffer.")
+
+(defun httpd--format-header (status)
+  "Return a header string for the `*httpd*' buffer showing STATUS."
+  (format "Status:  %s\nURL:     %s\nRoot:    %s\n\nKeys: q  bury buffer   s  stop server\n\n"
+          status
+          (format "http://%s:%d/"
+                  (cl-case httpd-host
+                    ((nil) "0.0.0.0")
+                    ((local) "localhost")
+                    (otherwise httpd-host))
+                  httpd-port)
+          httpd-root))
+
+(defun httpd--update-status (status)
+  "Rewrite the header section of the `*httpd*' buffer to reflect STATUS."
+  (when-let* ((buf (get-buffer "*httpd*")))
+    (with-current-buffer buf
+      (when httpd--log-start
+        (let ((inhibit-read-only t))
+          (delete-region (point-min) httpd--log-start)
+          (save-excursion
+            (goto-char (point-min))
+            (insert (httpd--format-header status) "--- Log ---\n")
+            (setq httpd--log-start (point-marker))))))))
+
+(defun httpd--setup-buffer ()
+  "Initialize or reset the `*httpd*' buffer for a new server session.
+On first use, initializes the buffer with `httpd-mode', a status header,
+and a log separator.  On restart, preserves existing log entries and
+updates the header in place."
+  (with-current-buffer (get-buffer-create "*httpd*")
+    (if (eq major-mode 'httpd-mode)
+        (httpd--update-status "Starting...")
+      (httpd-mode)
+      (let ((inhibit-read-only t))
+        (erase-buffer)
+        (insert (httpd--format-header "Starting...") "--- Log ---\n")
+        (setq httpd--log-start (point-marker))))))
+
 ;; User interface
 
 ;;;###autoload
@@ -306,6 +359,7 @@ If the server is already running, this will restart the server.  There
 is only one server instance per Emacs instance."
   (interactive)
   (httpd-stop)
+  (httpd--setup-buffer)
   (httpd-log `(start ,(httpd-date-string)))
   (setq httpd--server
         (make-network-process
@@ -317,6 +371,7 @@ is only one server instance per Emacs instance."
          :filter   #'httpd--filter
          :coding   'binary
          :log      #'httpd--accept))
+  (httpd--update-status "Running")
   (run-hooks 'httpd-start-hook))
 
 ;;;###autoload
@@ -329,6 +384,7 @@ is only one server instance per Emacs instance."
     (setq httpd--server nil
           httpd--clients nil)
     (httpd-log `(stop ,(httpd-date-string)))
+    (httpd--update-status "Stopped")
     (run-hooks 'httpd-stop-hook)))
 
 ;;;###autoload
